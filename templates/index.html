@@ -71,28 +71,45 @@
   let editor;
 
   require(['vs/editor/editor.main'], function() {
-
-    // Register your custom language 'cscriptplus'
+    // Register your custom language
     monaco.languages.register({ id: 'cscriptplus' });
 
-    // Disable diagnostics by clearing markers on every change
+    // Setup auto-indentation rules
+    monaco.languages.setLanguageConfiguration('cscriptplus', {
+      autoClosingPairs: [
+        { open: '"', close: '"' },
+        { open: "'", close: "'" },
+        { open: "(", close: ")" },
+        { open: "[", close: "]" },
+        { open: "{", close: "}" }
+      ],
+      indentationRules: {
+        increaseIndentPattern: /^\s*(if|else|elif|while|for|do while|switch|case|default)\b.*$/,
+        decreaseIndentPattern: /^\s*end\b.*$/
+      }
+    });
+
+    // Disable red error lines
     monaco.editor.onDidCreateModel(function(model) {
       if (model.getModeId() === 'cscriptplus') {
         monaco.editor.setModelMarkers(model, 'owner', []);
       }
     });
 
+    // Create the editor instance
     editor = monaco.editor.create(document.getElementById('editor-container'), {
-      value: '',               // Empty editor on start
+      value: '',
       language: 'cscriptplus',
       theme: 'vs-light',
       automaticLayout: true,
       fontSize: 15,
       minimap: { enabled: false },
-      lineNumbers: "on"       // Show line numbers
+      lineNumbers: "on",
+      autoIndent: "full",
+      tabSize: 4
     });
 
-    // Also clear markers on content change (in case)
+    // Clear markers on content change
     editor.onDidChangeModelContent(() => {
       const model = editor.getModel();
       if(model.getModeId() === 'cscriptplus') {
