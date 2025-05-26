@@ -1,1 +1,1 @@
-# CLScript+ : The New Programming language We Made
+# CLScript+ : The New Programming Language We Made
