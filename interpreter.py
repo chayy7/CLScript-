@@ -10,25 +10,25 @@ def interpret_cscript(code, input_string=""):
                 var, val = part.strip().split('=')
                 var = var.strip()
                 val = val.strip()
-                # Try to parse as int or float
                 try:
                     if '.' in val:
                         inputs[var] = float(val)
                     else:
                         inputs[var] = int(val)
                 except ValueError:
-                    inputs[var] = val  # fallback as string if needed
+                    try:
+                        inputs[var] = eval(val)
+                    except:
+                        inputs[var] = val
 
     output = ""
 
-    # Helper to evaluate expressions safely in variables context
     def eval_expr(expr):
         try:
             return eval(expr, {}, variables)
         except Exception as e:
             raise Exception(f"Error evaluating expression '{expr}': {e}")
 
-    # Helper to get a block of code lines indented under the current line
     def get_block(start_index, start_indent):
         block_lines = []
         i = start_index
@@ -42,11 +42,9 @@ def interpret_cscript(code, input_string=""):
             i += 1
         return block_lines, i
 
-    # Helper to parse if-elif-else blocks without needing 'end'
     def parse_if_block(start_index):
-        blocks = []  # List of tuples (type, condition, block_lines)
+        blocks = []
         i = start_index
-
         while i < len(lines):
             line = lines[i].strip()
             if line.startswith("if "):
@@ -71,9 +69,8 @@ def interpret_cscript(code, input_string=""):
                 break
         return blocks, i
 
-    # Helper to parse switch-case blocks without 'end'
     def parse_switch_block(start_index):
-        cases = []  # List of tuples (case_value, block_lines), case_value can be None for default
+        cases = []
         i = start_index
         while i < len(lines):
             line = lines[i].strip()
@@ -97,71 +94,54 @@ def interpret_cscript(code, input_string=""):
     while i < len(lines):
         line = lines[i].strip()
         raw_line = lines[i]
-        indent = len(lines[i]) - len(raw_line.lstrip())
+        indent = len(raw_line) - len(raw_line.lstrip())
 
-        if line.startswith("keep "):
+        if line.startswith("inp "):
             try:
-                var, value = line[5:].split('=')
-                var = var.strip()
-                value = value.strip()
-                variables[var] = eval_expr(value)
+                var, value = line[4:].split('=')
+                variables[var.strip()] = eval_expr(value.strip())
             except Exception as e:
-                output += f"Error in keep: {e}\n"
+                output += f"Error in inp: {e}\n"
             i += 1
 
         elif line.startswith("input int "):
             var = line[10:].strip()
-            if var in inputs:
-                try:
-                    variables[var] = int(inputs[var])
-                except ValueError:
-                    output += f"Invalid int input for {var}\n"
-            else:
-                output += f"Missing input for {var}\n"
+            variables[var] = int(inputs.get(var, 0))
             i += 1
 
         elif line.startswith("input float "):
             var = line[12:].strip()
-            if var in inputs:
-                try:
-                    variables[var] = float(inputs[var])
-                except ValueError:
-                    output += f"Invalid float input for {var}\n"
-            else:
-                output += f"Missing input for {var}\n"
+            variables[var] = float(inputs.get(var, 0.0))
             i += 1
 
-        elif line.startswith("output "):
-            expr = line[7:].strip()
+        elif line.startswith("out "):
+            expr = line[4:].strip()
             try:
                 result = eval_expr(expr)
                 output += str(result) + "\n"
             except Exception as e:
-                output += f"Error in output: {e}\n"
+                output += f"Error in out: {e}\n"
             i += 1
 
-        # IF-ELIF-ELSE
         elif line.startswith("if "):
             blocks, next_i = parse_if_block(i)
             executed = False
             for btype, cond, block_lines in blocks:
                 if btype == "else":
-                    # Execute else block if no prior condition matched
                     if not executed:
-                        output += interpret_cscript("\n".join(line.lstrip() for line in block_lines), "")
+                        output += interpret_cscript("\n".join(l.lstrip() for l in block_lines), "")
                         executed = True
                 else:
                     try:
                         if eval_expr(cond):
-                            output += interpret_cscript("\n".join(line.lstrip() for line in block_lines), "")
+                            output += interpret_cscript("\n".join(l.lstrip() for l in block_lines), "")
                             executed = True
                     except Exception as e:
-                        output += f"Error in if condition '{cond}': {e}\n"
+                        output += f"Error in {btype} condition '{cond}': {e}\n"
                 if executed:
                     break
             i = next_i
 
-        # SWITCH CASE
         elif line.startswith("switch "):
             switch_expr = line[7:].strip()
             i += 1
@@ -170,135 +150,87 @@ def interpret_cscript(code, input_string=""):
                 switch_val = eval_expr(switch_expr)
                 executed_case = False
                 for case_val, block_lines in cases:
-                    if case_val is not None:
-                        try:
-                            case_eval = eval_expr(case_val)
-                        except:
-                            case_eval = case_val  # fallback string
-                        if switch_val == case_eval:
-                            output += interpret_cscript("\n".join(line.lstrip() for line in block_lines), "")
+                    try:
+                        if case_val is not None and eval_expr(case_val) == switch_val:
+                            output += interpret_cscript("\n".join(l.lstrip() for l in block_lines), "")
                             executed_case = True
                             break
-                    else:
-                        # default case
-                        if not executed_case:
-                            output += interpret_cscript("\n".join(line.lstrip() for line in block_lines), "")
-                            executed_case = True
+                    except:
+                        continue
+                if not executed_case:
+                    for case_val, block_lines in cases:
+                        if case_val is None:
+                            output += interpret_cscript("\n".join(l.lstrip() for l in block_lines), "")
                             break
             except Exception as e:
                 output += f"Error in switch expression '{switch_expr}': {e}\n"
             i = next_i
 
-        # WHILE loop
         elif line.startswith("while "):
             cond_expr = line[6:].strip()
             i += 1
-            if i < len(lines):
-                body_indent = len(lines[i]) - len(lines[i].lstrip())
-                body_lines, next_pos = get_block(i, body_indent)
-            else:
-                body_lines = []
-                next_pos = i
-
+            body_indent = len(lines[i]) - len(lines[i].lstrip()) if i < len(lines) else 0
+            body_lines, next_i = get_block(i, body_indent)
             try:
                 while eval_expr(cond_expr):
-                    output += interpret_cscript("\n".join(line.lstrip() for line in body_lines), "")
+                    output += interpret_cscript("\n".join(l.lstrip() for l in body_lines), "")
             except Exception as e:
-                output += f"Error in while loop condition '{cond_expr}': {e}\n"
+                output += f"Error in while loop: {e}\n"
+            i = next_i
 
-            i = next_pos
-
-        # DO WHILE loop
         elif line.startswith("do while "):
             cond_expr = line[9:].strip()
             i += 1
-            if i < len(lines):
-                body_indent = len(lines[i]) - len(lines[i].lstrip())
-                body_lines, next_pos = get_block(i, body_indent)
-            else:
-                body_lines = []
-                next_pos = i
-
+            body_indent = len(lines[i]) - len(lines[i].lstrip()) if i < len(lines) else 0
+            body_lines, next_i = get_block(i, body_indent)
             try:
                 while True:
-                    output += interpret_cscript("\n".join(line.lstrip() for line in body_lines), "")
+                    output += interpret_cscript("\n".join(l.lstrip() for l in body_lines), "")
                     if not eval_expr(cond_expr):
                         break
             except Exception as e:
-                output += f"Error in do while loop condition '{cond_expr}': {e}\n"
+                output += f"Error in do while loop: {e}\n"
+            i = next_i
 
-            i = next_pos
-
-        # FOR loop (C-style for(init; cond; incr))
-        elif line.startswith("for "):
-            for_content = line[4:].strip()
-            try:
-                init_part, cond_part, incr_part = [x.strip() for x in for_content.split(';')]
-            except Exception:
-                output += "Invalid for loop syntax. Use: for init; condition; increment\n"
-                i += 1
-                continue
-
-            try:
-                exec(init_part, {}, variables)
-            except Exception as e:
-                output += f"Error in for-loop init '{init_part}': {e}\n"
-                i += 1
-                continue
-
-            i += 1
-            if i < len(lines):
-                body_indent = len(lines[i]) - len(lines[i].lstrip())
-                body_lines, next_pos = get_block(i, body_indent)
-            else:
-                body_lines = []
-                next_pos = i
-
-            try:
-                while eval_expr(cond_part):
-                    output += interpret_cscript("\n".join(line.lstrip() for line in body_lines), "")
-                    exec(incr_part, {}, variables)
-            except Exception as e:
-                output += f"Error in for-loop condition/increment: {e}\n"
-
-            i = next_pos
-
-        # FOR EACH loop
         elif line.startswith("for each "):
-            for_each_content = line[9:].strip()
-            if ' in ' not in for_each_content:
-                output += "Invalid for each syntax. Use: for each var in collection\n"
+            content = line[9:].strip()
+            if ' in ' not in content:
+                output += "Invalid for each syntax.\n"
                 i += 1
                 continue
-
-            var_name, collection_name = [x.strip() for x in for_each_content.split(' in ', 1)]
-            collection = variables.get(collection_name, None)
-            if collection is None:
-                output += f"Collection '{collection_name}' not found for for each loop.\n"
-                i += 1
-                continue
-
+            var_name, collection_name = map(str.strip, content.split(' in ', 1))
+            collection = variables.get(collection_name, [])
             if not hasattr(collection, '__iter__'):
                 output += f"Variable '{collection_name}' is not iterable.\n"
                 i += 1
                 continue
-
             i += 1
-            if i < len(lines):
-                body_indent = len(lines[i]) - len(lines[i].lstrip())
-                body_lines, next_pos = get_block(i, body_indent)
-            else:
-                body_lines = []
-                next_pos = i
-
+            body_indent = len(lines[i]) - len(lines[i].lstrip()) if i < len(lines) else 0
+            body_lines, next_i = get_block(i, body_indent)
             for item in collection:
                 variables[var_name] = item
-                output += interpret_cscript("\n".join(line.lstrip() for line in body_lines), "")
+                output += interpret_cscript("\n".join(l.lstrip() for l in body_lines), "")
+            i = next_i
 
-            i = next_pos
+        elif line.startswith("for ") and "to" in line:
+            try:
+                left, right = line[4:].split("to")
+                var, start_val = left.split('=')
+                var = var.strip()
+                start_val = eval_expr(start_val.strip())
+                end_val = eval_expr(right.strip())
+                i += 1
+                body_indent = len(lines[i]) - len(lines[i].lstrip()) if i < len(lines) else 0
+                body_lines, next_i = get_block(i, body_indent)
+                for loop_val in range(start_val, end_val):
+                    variables[var] = loop_val
+                    output += interpret_cscript("\n".join(l.lstrip() for l in body_lines), "")
+                i = next_i
+            except Exception as e:
+                output += f"Invalid for loop syntax: {e}\n"
+                i += 1
 
         else:
-            # Unknown or empty line - just skip
             i += 1
 
     return output
